@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Attack Log{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-4">
+  <h1 class="text-lg font-semibold">Attack Log</h1>
+  <div class="flex gap-3 items-center">
+    <select id="serviceFilter"
+            class="bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-300 focus:outline-none">
+      <option value="">All Services</option>
+      <option value="ssh">SSH</option>
+      <option value="http">HTTP</option>
+      <option value="ftp">FTP</option>
+    </select>
+    <input id="searchBox" type="text" placeholder="Filter by IP / country / path…"
+           class="bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-300 focus:outline-none w-64"/>
+  </div>
+</div>
+
+<div class="card p-0 overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="w-full text-xs">
+      <thead class="bg-gray-900/50">
+        <tr class="text-gray-500 border-b border-gray-800">
+          <th class="text-left px-4 py-3 font-medium">#</th>
+          <th class="text-left px-4 py-3 font-medium">Timestamp</th>
+          <th class="text-left px-4 py-3 font-medium">Service</th>
+          <th class="text-left px-4 py-3 font-medium">Source IP</th>
+          <th class="text-left px-4 py-3 font-medium">Country / City</th>
+          <th class="text-left px-4 py-3 font-medium">ISP / ASN</th>
+          <th class="text-left px-4 py-3 font-medium">Credential / Path</th>
+          <th class="text-left px-4 py-3 font-medium">Payload / Type</th>
+        </tr>
+      </thead>
+      <tbody id="attackTable" class="divide-y divide-gray-800/40 font-mono"></tbody>
+    </table>
+    <div id="emptyState" class="hidden text-center text-gray-600 py-12">No attacks recorded yet.</div>
+  </div>
+  <div class="px-4 py-3 border-t border-gray-800 flex items-center justify-between text-xs text-gray-500">
+    <span id="countLabel">—</span>
+    <button id="loadMore" class="text-blue-400 hover:text-blue-300">Load more</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allAttacks = [];
+let displayed  = 0;
+const PAGE     = 100;
+
+const badgeHtml = (svc) => {
+  const cls = { ssh:"badge-ssh", http:"badge-http", ftp:"badge-ftp" }[svc] || "badge-ssh";
+  return `<span class="px-2 py-0.5 rounded-full text-xs font-mono ${cls}">${esc(svc?.toUpperCase())}</span>`;
+};
+
+function renderRows(attacks) {
+  const tbody = document.getElementById("attackTable");
+  const rows  = attacks.map(a => `
+    <tr class="hover:bg-white/5 transition">
+      <td class="px-4 py-2 text-gray-600">${a.id}</td>
+      <td class="px-4 py-2 text-gray-400">${esc(a.timestamp) || "—"}</td>
+      <td class="px-4 py-2">${badgeHtml(a.service)}</td>
+      <td class="px-4 py-2 text-blue-300 whitespace-nowrap">${esc(a.src_ip)}${a.src_port ? ":" + a.src_port : ""}</td>
+      <td class="px-4 py-2 text-gray-300 whitespace-nowrap">${esc(a.country) || "—"}${a.city ? " / " + esc(a.city) : ""}</td>
+      <td class="px-4 py-2 text-gray-500 max-w-[180px] truncate">${esc(a.isp || a.asn) || "—"}</td>
+      <td class="px-4 py-2 text-yellow-300 max-w-[180px] truncate">${
+        a.service === "ssh"
+          ? `${esc(a.username)}  /  ${esc(a.password)}`
+          : esc(a.path || "—")
+      }</td>
+      <td class="px-4 py-2 text-gray-400 max-w-[220px] truncate" title="${esc(a.payload)}">${
+        esc((a.payload || a.user_agent || "—").slice(0,80))
+      }</td>
+    </tr>`).join("");
+  tbody.insertAdjacentHTML("beforeend", rows);
+}
+
+function applyFilters() {
+  const svc    = document.getElementById("serviceFilter").value;
+  const query  = document.getElementById("searchBox").value.toLowerCase();
+  return allAttacks.filter(a => {
+    const matchSvc = !svc || a.service === svc;
+    const matchQ   = !query ||
+      (a.src_ip||"").includes(query) ||
+      (a.country||"").toLowerCase().includes(query) ||
+      (a.path||"").toLowerCase().includes(query) ||
+      (a.username||"").toLowerCase().includes(query) ||
+      (a.password||"").toLowerCase().includes(query) ||
+      (a.isp||"").toLowerCase().includes(query);
+    return matchSvc && matchQ;
+  });
+}
+
+function redraw() {
+  document.getElementById("attackTable").innerHTML = "";
+  displayed = 0;
+  const filtered = applyFilters();
+  const slice = filtered.slice(0, PAGE);
+  displayed = slice.length;
+  renderRows(slice);
+  document.getElementById("countLabel").textContent =
+    `Showing ${displayed} of ${filtered.length} attacks`;
+  document.getElementById("emptyState").classList.toggle("hidden", filtered.length > 0);
+  document.getElementById("loadMore").classList.toggle("hidden",
+    displayed >= filtered.length);
+}
+
+document.getElementById("loadMore").addEventListener("click", () => {
+  const filtered = applyFilters();
+  const next = filtered.slice(displayed, displayed + PAGE);
+  renderRows(next);
+  displayed += next.length;
+  document.getElementById("countLabel").textContent =
+    `Showing ${displayed} of ${filtered.length} attacks`;
+  document.getElementById("loadMore").classList.toggle("hidden",
+    displayed >= filtered.length);
+});
+
+document.getElementById("serviceFilter").addEventListener("change", redraw);
+document.getElementById("searchBox").addEventListener("input", redraw);
+
+async function load() {
+  allAttacks = await fetch("/api/attacks?limit=1000").then(r=>r.json());
+  redraw();
+}
+load();
+
+function onNewAttack(attack) {
+  allAttacks.unshift(attack);
+  redraw();
+}
+</script>
+{% endblock %}

@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6" id="statCards">
+  <div class="card p-5">
+    <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Total Attacks</p>
+    <p class="stat-number text-red-400" id="statTotal">—</p>
+    <p class="text-xs text-gray-600 mt-1">all time</p>
+  </div>
+  <div class="card p-5">
+    <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">Unique IPs</p>
+    <p class="stat-number text-blue-400" id="statIPs">—</p>
+    <p class="text-xs text-gray-600 mt-1">distinct attackers</p>
+  </div>
+  <div class="card p-5">
+    <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">SSH Attacks</p>
+    <p class="stat-number text-purple-400" id="statSSH">—</p>
+    <p class="text-xs text-gray-600 mt-1">brute-force attempts</p>
+  </div>
+  <div class="card p-5">
+    <p class="text-xs text-gray-500 uppercase tracking-wider mb-2">HTTP Attacks</p>
+    <p class="stat-number text-green-400" id="statHTTP">—</p>
+    <p class="text-xs text-gray-600 mt-1">web probes / exploits</p>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-6">
+  <div class="card p-4 xl:col-span-2">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-sm font-semibold">Attack Origins</h2>
+      <span class="text-xs text-gray-500 pulse" id="liveIndicator">● LIVE</span>
+    </div>
+    <div id="map"></div>
+  </div>
+  <div class="card p-4 self-start">
+    <h2 class="text-sm font-semibold mb-3">Attacks / Hour (last 24h)</h2>
+    <div style="height:200px; position:relative;">
+      <canvas id="hourlyChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+  <div class="card p-4">
+    <h2 class="text-sm font-semibold mb-3">Top Attacker IPs</h2>
+    <ul class="space-y-2 text-xs" id="topIPs"></ul>
+  </div>
+  <div class="card p-4">
+    <h2 class="text-sm font-semibold mb-3">Most-Tried Passwords</h2>
+    <ul class="space-y-2 text-xs" id="topPasswords"></ul>
+  </div>
+  <div class="card p-4">
+    <h2 class="text-sm font-semibold mb-3">Top Countries</h2>
+    <ul class="space-y-2 text-xs" id="topCountries"></ul>
+  </div>
+  <div class="card p-4 flex flex-col items-center">
+    <h2 class="text-sm font-semibold mb-3 self-start">By Service</h2>
+    <canvas id="servicePie" width="160" height="160"></canvas>
+  </div>
+</div>
+
+<div class="card p-4">
+  <div class="flex items-center justify-between mb-3">
+    <h2 class="text-sm font-semibold">Recent Attacks</h2>
+    <a href="/attacks" class="text-xs text-blue-400 hover:text-blue-300">View all →</a>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="w-full text-xs">
+      <thead>
+        <tr class="text-gray-500 border-b border-gray-800">
+          <th class="text-left py-2 pr-4 font-medium">Time</th>
+          <th class="text-left py-2 pr-4 font-medium">Service</th>
+          <th class="text-left py-2 pr-4 font-medium">IP</th>
+          <th class="text-left py-2 pr-4 font-medium">Country</th>
+          <th class="text-left py-2 pr-4 font-medium">Credential / Path</th>
+        </tr>
+      </thead>
+      <tbody id="recentFeed" class="divide-y divide-gray-800/50 font-mono"></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const fmt = (n) => n?.toLocaleString() ?? "—";
+const badgeHtml = (svc) => {
+  const cls = { ssh:"badge-ssh", http:"badge-http", ftp:"badge-ftp" }[svc] || "badge-ssh";
+  return `<span class="px-2 py-0.5 rounded-full text-xs font-mono ${cls}">${esc(svc?.toUpperCase())}</span>`;
+};
+
+const map = L.map("map", { zoomControl: true, attributionControl: false })
+              .setView([20, 0], 2);
+L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+  maxZoom: 19
+}).addTo(map);
+
+const markerGroup = L.layerGroup().addTo(map);
+
+function addMapPoint(p) {
+  if (!p.latitude || !p.longitude) return;
+  const color = p.service === "ssh" ? "#58a6ff" : p.service === "http" ? "#3fb950" : "#d29922";
+  const circle = L.circleMarker([p.latitude, p.longitude], {
+    radius: Math.min(4 + Math.log(p.cnt || 1) * 2, 18),
+    color, fillColor: color, fillOpacity: 0.6, weight: 1,
+  });
+  circle.bindPopup(`
+    <b>${esc(p.src_ip)}</b><br/>
+    ${esc(p.city)} ${esc(p.country)}<br/>
+    Service: ${esc(p.service?.toUpperCase())}<br/>
+    Count: ${p.cnt}
+  `);
+  markerGroup.addLayer(circle);
+}
+
+const hourlyCtx = document.getElementById("hourlyChart").getContext("2d");
+const hourlyChart = new Chart(hourlyCtx, {
+  type: "bar",
+  data: { labels: [], datasets: [{
+    label: "Attacks",
+    data: [],
+    backgroundColor: "#f8514966",
+    borderColor: "#f85149",
+    borderWidth: 1,
+    borderRadius: 4,
+  }]},
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false }},
+    scales: {
+      x: { ticks: { color:"#8b949e", maxTicksLimit: 6, maxRotation: 0 },
+           grid: { color:"#30363d" }},
+      y: { ticks: { color:"#8b949e" }, grid: { color:"#30363d" }},
+    },
+  },
+});
+
+const pieCtx = document.getElementById("servicePie").getContext("2d");
+const servicePie = new Chart(pieCtx, {
+  type: "doughnut",
+  data: { labels:["SSH","HTTP","FTP"], datasets:[{
+    data: [0,0,0],
+    backgroundColor:["#1f6feb","#3fb950","#d29922"],
+    borderColor:"#161b22", borderWidth:3,
+  }]},
+  options: {
+    responsive:false,
+    plugins:{ legend:{ position:"bottom", labels:{ color:"#8b949e", font:{size:11}}}},
+    cutout:"65%",
+  },
+});
+
+function renderList(elId, items, key1, key2) {
+  const el = document.getElementById(elId);
+  const max = items[0]?.[key2] || 1;
+  el.innerHTML = items.map(it => `
+    <li class="flex items-center gap-2">
+      <span class="text-gray-300 truncate max-w-[140px]">${esc(it[key1]) || "—"}</span>
+      <div class="flex-1 bg-gray-800 rounded-full h-1.5 overflow-hidden">
+        <div class="h-full bg-red-500 rounded-full" style="width:${Math.round(it[key2]/max*100)}%"></div>
+      </div>
+      <span class="text-gray-500 w-8 text-right">${it[key2]}</span>
+    </li>`).join("");
+}
+
+function renderFeed(attacks) {
+  const tbody = document.getElementById("recentFeed");
+  tbody.innerHTML = attacks.slice(0,20).map(a => `
+    <tr class="hover:bg-white/5 transition">
+      <td class="py-1.5 pr-4 text-gray-500">${esc(a.timestamp?.slice(11,19))}</td>
+      <td class="py-1.5 pr-4">${badgeHtml(a.service)}</td>
+      <td class="py-1.5 pr-4 text-blue-300">${esc(a.src_ip)}</td>
+      <td class="py-1.5 pr-4 text-gray-400">${esc(a.country) || "—"}</td>
+      <td class="py-1.5 pr-4 text-gray-300 truncate max-w-xs">${
+        a.username ? `${esc(a.username)} / ${esc(a.password)}` : esc(a.path || "—")
+      }</td>
+    </tr>`).join("");
+}
+
+async function loadAll() {
+  const [stats, attacks, mapData] = await Promise.all([
+    fetch("/api/stats").then(r=>r.json()),
+    fetch("/api/attacks?limit=20").then(r=>r.json()),
+    fetch("/api/map").then(r=>r.json()),
+  ]);
+
+  document.getElementById("statTotal").textContent = fmt(stats.total);
+  document.getElementById("statIPs").textContent   = fmt(stats.unique_ips);
+  const ssh  = stats.by_service?.find(s=>s.service==="ssh")?.cnt  || 0;
+  const http = stats.by_service?.find(s=>s.service==="http")?.cnt || 0;
+  const ftp  = stats.by_service?.find(s=>s.service==="ftp")?.cnt  || 0;
+  document.getElementById("statSSH").textContent  = fmt(ssh);
+  document.getElementById("statHTTP").textContent = fmt(http);
+
+  const hourly = [...(stats.hourly || [])].reverse();
+  hourlyChart.data.labels   = hourly.map(h => h.hour?.slice(11) + ":00");
+  hourlyChart.data.datasets[0].data = hourly.map(h => h.cnt);
+  hourlyChart.update();
+
+  servicePie.data.datasets[0].data = [ssh, http, ftp];
+  servicePie.update();
+
+  renderList("topIPs",       stats.top_ips || [],       "src_ip",  "cnt");
+  renderList("topPasswords", stats.top_passwords || [], "password","cnt");
+  renderList("topCountries", stats.top_countries || [], "country", "cnt");
+
+  renderFeed(attacks);
+
+  markerGroup.clearLayers();
+  mapData.forEach(addMapPoint);
+}
+
+loadAll();
+setInterval(loadAll, 15000);   
+
+function onNewAttack(attack) {
+  fetch("/api/stats").then(r=>r.json()).then(stats => {
+    document.getElementById("statTotal").textContent = fmt(stats.total);
+    document.getElementById("statIPs").textContent   = fmt(stats.unique_ips);
+  });
+  addMapPoint({ ...attack, cnt: 1 });
+}
+</script>
+{% endblock %}

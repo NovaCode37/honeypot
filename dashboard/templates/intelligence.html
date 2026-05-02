@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+{% block title %}Threat Intelligence{% endblock %}
+
+{% block head %}
+<style>
+  .mitre-card { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:.75rem 1rem; }
+  .severity-critical { border-left:3px solid #f85149; }
+  .severity-high     { border-left:3px solid #d29922; }
+  .severity-medium   { border-left:3px solid #58a6ff; }
+  .severity-low      { border-left:3px solid #3fb950; }
+  .severity-info     { border-left:3px solid #8b949e; }
+  .threat-bar { height:6px; border-radius:3px; transition: width .4s ease; }
+  .score-ring { width:64px; height:64px; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <h1 class="text-xl font-bold text-white">⚡ Threat Intelligence</h1>
+    <p class="text-sm text-gray-500 mt-0.5">MITRE ATT&CK mapping · IP reputation scoring · Campaign detection · ML anomalies</p>
+  </div>
+  <button onclick="loadAll()" class="text-xs px-3 py-1.5 rounded-lg bg-purple-900 text-purple-300 hover:bg-purple-800 transition">↺ Refresh</button>
+</div>
+
+<div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6" id="threatLevelCards">
+  <div class="card p-4 text-center severity-critical">
+    <p class="text-xs text-gray-500 uppercase tracking-wider mb-1">Critical</p>
+    <p class="text-2xl font-bold text-red-400" id="lvlCritical">—</p>
+  </div>
+  <div class="card p-4 text-center severity-high">
+    <p class="text-xs text-gray-500 uppercase tracking-wider mb-1">High</p>
+    <p class="text-2xl font-bold text-yellow-400" id="lvlHigh">—</p>
+  </div>
+  <div class="card p-4 text-center severity-medium">
+    <p class="text-xs text-gray-500 uppercase tracking-wider mb-1">Medium</p>
+    <p class="text-2xl font-bold text-blue-400" id="lvlMedium">—</p>
+  </div>
+  <div class="card p-4 text-center severity-low">
+    <p class="text-xs text-gray-500 uppercase tracking-wider mb-1">Low</p>
+    <p class="text-2xl font-bold text-green-400" id="lvlLow">—</p>
+  </div>
+  <div class="card p-4 text-center severity-info">
+    <p class="text-xs text-gray-500 uppercase tracking-wider mb-1">Info</p>
+    <p class="text-2xl font-bold text-gray-400" id="lvlInfo">—</p>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-6">
+
+  <div class="card p-5">
+    <h2 class="text-sm font-semibold mb-4">MITRE ATT&CK — Observed Techniques</h2>
+    <div id="mitreChart" style="position:relative; height:260px;">
+      <canvas id="mitreBarChart"></canvas>
+    </div>
+    <div class="mt-4 space-y-2 text-xs" id="mitreLegend"></div>
+  </div>
+
+  <div class="card p-5">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-sm font-semibold">ML Anomaly Detection</h2>
+      <span class="text-xs px-2 py-0.5 rounded-full bg-purple-900 text-purple-300">IsolationForest</span>
+    </div>
+    <p class="text-xs text-gray-500 mb-3">Attacks flagged as statistically anomalous by the trained model (lowest anomaly scores = most unusual)</p>
+    <div class="space-y-2 text-xs font-mono overflow-y-auto" style="max-height:280px;" id="anomalyList">
+      <p class="text-gray-600 italic">Loading…</p>
+    </div>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-6">
+
+  <div class="card p-5">
+    <h2 class="text-sm font-semibold mb-4">Top Threat Actors — IP Reputation Score</h2>
+    <div class="space-y-3" id="threatList">
+      <p class="text-xs text-gray-600 italic">Loading…</p>
+    </div>
+  </div>
+
+  <div class="card p-5">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-sm font-semibold">Coordinated Campaigns</h2>
+      <span class="text-xs px-2 py-0.5 rounded-full bg-red-900 text-red-300">AUTO-DETECTED</span>
+    </div>
+    <p class="text-xs text-gray-500 mb-3">Groups of IPs sharing the same credential or scanning tool — indicating organised campaigns</p>
+    <div class="space-y-3 text-xs" id="campaignList">
+      <p class="text-xs text-gray-600 italic">Loading…</p>
+    </div>
+  </div>
+</div>
+
+<div class="card p-5 mb-6">
+  <h2 class="text-sm font-semibold mb-4">MITRE ATT&CK Technique Reference</h2>
+  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2" id="mitreCatalogue">
+    <p class="text-xs text-gray-600 italic">Loading…</p>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+
+const SEVERITY_COLORS = {
+  critical: "#f85149",
+  high:     "#d29922",
+  medium:   "#58a6ff",
+  low:      "#3fb950",
+  info:     "#8b949e",
+};
+
+const mitreCtx = document.getElementById("mitreBarChart").getContext("2d");
+const mitreBarChart = new Chart(mitreCtx, {
+  type: "bar",
+  data: { labels: [], datasets: [{
+    label: "Occurrences",
+    data: [],
+    backgroundColor: "#a371f7aa",
+    borderColor: "#a371f7",
+    borderWidth: 1,
+    borderRadius: 4,
+  }]},
+  options: {
+    indexAxis: "y",
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false }},
+    scales: {
+      x: { ticks: { color:"#8b949e" }, grid: { color:"#30363d" }},
+      y: { ticks: { color:"#c9d1d9", font:{ size:10 } }, grid: { color:"#21262d" }},
+    },
+  },
+});
+
+function renderThreatLevels(levels) {
+  const map = {};
+  (levels || []).forEach(l => map[l.threat_level] = l.cnt);
+  document.getElementById("lvlCritical").textContent = (map.critical || 0).toLocaleString();
+  document.getElementById("lvlHigh").textContent     = (map.high     || 0).toLocaleString();
+  document.getElementById("lvlMedium").textContent   = (map.medium   || 0).toLocaleString();
+  document.getElementById("lvlLow").textContent      = (map.low      || 0).toLocaleString();
+  document.getElementById("lvlInfo").textContent     = (map.info     || 0).toLocaleString();
+}
+
+function renderMitre(topTechniques, allTechniques) {
+  const techMap = {};
+  (allTechniques || []).forEach(t => techMap[t.id] = t);
+
+  const top = (topTechniques || []).slice(0, 10);
+  mitreBarChart.data.labels   = top.map(t => t.id);
+  mitreBarChart.data.datasets[0].data = top.map(t => t.count);
+  mitreBarChart.update();
+
+  const legend = document.getElementById("mitreLegend");
+  legend.innerHTML = top.map(t => {
+    const info = techMap[t.id] || {};
+    const sev  = info.severity || "info";
+    const col  = SEVERITY_COLORS[sev] || "#8b949e";
+    return `
+      <div class="flex items-center gap-2 py-1 border-b border-gray-800/50">
+        <span class="font-mono text-purple-300 w-20 shrink-0">${t.id}</span>
+        <span class="text-gray-300 flex-1">${info.name || t.id}</span>
+        <span class="text-gray-500 w-14 text-center">${info.tactic || ""}</span>
+        <span class="px-1.5 py-0.5 rounded text-xs" style="background:${col}22;color:${col};border:1px solid ${col}44">${sev}</span>
+        <span class="text-gray-500 w-8 text-right">${t.count}</span>
+      </div>`;
+  }).join("");
+}
+
+function renderAnomalies(anomalies) {
+  const el = document.getElementById("anomalyList");
+  if (!anomalies || anomalies.length === 0) {
+    el.innerHTML = '<p class="text-gray-500 italic">No anomalies detected yet — more data needed to train the model.</p>';
+    return;
+  }
+  el.innerHTML = anomalies.slice(0, 15).map(a => {
+    const score = (a.anomaly_score || 0).toFixed(3);
+    const svc   = (a.service || "").toUpperCase();
+    const badges = { SSH:"badge-ssh", HTTP:"badge-http", FTP:"badge-ftp" };
+    const badgeCls = badges[svc] || "badge-ssh";
+    return `
+      <div class="flex items-start gap-2 py-1.5 border-b border-gray-800/40">
+        <span class="px-1.5 py-0.5 rounded text-xs ${badgeCls} shrink-0">${esc(svc)}</span>
+        <span class="text-red-300 w-28 shrink-0">${esc(a.src_ip) || "?"}</span>
+        <span class="text-gray-400 flex-1 truncate">${
+          a.username ? `user:${esc(a.username)} / ${esc(a.password)}` : esc(a.path || a.payload || "")
+        }</span>
+        <span class="text-purple-400 w-16 text-right shrink-0" title="anomaly score">${score}</span>
+      </div>`;
+  }).join("");
+}
+
+function renderThreats(threats) {
+  const el = document.getElementById("threatList");
+  if (!threats || threats.length === 0) {
+    el.innerHTML = '<p class="text-xs text-gray-600 italic">No threat data yet.</p>';
+    return;
+  }
+  el.innerHTML = threats.slice(0, 12).map(t => {
+    const col   = t.color || "#8b949e";
+    const score = t.score || 0;
+    const pct   = Math.min(score, 100);
+    return `
+      <div class="flex items-center gap-3 py-1">
+        <span class="font-mono text-xs text-blue-300 w-28 shrink-0">${esc(t.ip)}</span>
+        <div class="flex-1">
+          <div class="flex items-center justify-between mb-0.5">
+            <span class="text-xs" style="color:${col}">${t.level?.toUpperCase()}</span>
+            <span class="text-xs text-gray-500">${t.attack_count} attacks</span>
+          </div>
+          <div class="bg-gray-800 rounded-full h-1.5 overflow-hidden">
+            <div class="h-full rounded-full threat-bar" style="width:${pct}%;background:${col}"></div>
+          </div>
+        </div>
+        <span class="text-sm font-bold shrink-0" style="color:${col}">${score}</span>
+      </div>
+      <div class="ml-28 text-xs text-gray-600 -mt-1 mb-1">${(t.reasons || []).slice(0,2).join(' · ')}</div>`;
+  }).join("");
+}
+
+function renderCampaigns(campaigns) {
+  const el = document.getElementById("campaignList");
+  if (!campaigns || campaigns.length === 0) {
+    el.innerHTML = '<p class="text-gray-500 italic">No campaigns detected (need ≥5 IPs sharing same indicator).</p>';
+    return;
+  }
+  el.innerHTML = campaigns.map(c => `
+    <div class="card p-3 severity-high">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-xs font-semibold text-yellow-400">${c.type === "credential_sharing" ? "🔑 Credential Sharing" : "🤖 Tool Sharing"}</span>
+        <span class="text-xs text-gray-500">${c.ip_count} IPs · ${c.total_hits} hits</span>
+      </div>
+      <p class="text-gray-300 font-mono truncate">${esc(c.indicator)}</p>
+      <p class="text-gray-500 text-xs mt-1">${esc(c.description)}</p>
+    </div>`).join("");
+}
+
+function renderCatalogue(techniques) {
+  const el = document.getElementById("mitreCatalogue");
+  el.innerHTML = (techniques || []).map(t => {
+    const col = SEVERITY_COLORS[t.severity] || "#8b949e";
+    return `
+      <a href="${t.url}" target="_blank" rel="noopener"
+         class="mitre-card severity-${t.severity} hover:border-gray-500 transition block">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs font-mono text-purple-300">${t.id}</span>
+          <span class="text-xs px-1.5 py-0.5 rounded"
+                style="background:${col}22;color:${col}">${t.severity}</span>
+        </div>
+        <p class="text-sm text-white font-medium">${t.name}</p>
+        <p class="text-xs text-gray-500 mt-0.5">${t.tactic}</p>
+      </a>`;
+  }).join("");
+}
+
+async function loadAll() {
+  const [intel, threats] = await Promise.all([
+    fetch("/api/intel").then(r => r.json()),
+    fetch("/api/threats").then(r => r.json()),
+  ]);
+
+  renderThreatLevels(intel.threat_levels);
+  renderMitre(intel.top_techniques, intel.techniques);
+  renderAnomalies(intel.anomalies);
+  renderCatalogue(intel.techniques);
+  renderThreats(threats.top_threats);
+  renderCampaigns(threats.campaigns);
+}
+
+loadAll();
+setInterval(loadAll, 30000);
+</script>
+{% endblock %}

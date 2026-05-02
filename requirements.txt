@@ -1,0 +1,11 @@
+flask==3.0.3
+flask-socketio==5.3.6
+paramiko==3.4.0
+requests==2.31.0
+python-dotenv==1.0.1
+eventlet==0.35.2
+scikit-learn==1.4.2
+numpy==1.26.4
+fpdf2==2.7.9
+gunicorn==22.0.0
+pytest==8.1.1

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}HoneyShield{% endblock %} — Attack Dashboard</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <link  rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+
+  <style>
+    body { background-color: #0d1117; color: #e6edf3; font-family: 'Segoe UI', sans-serif; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #161b22; }
+    ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+    .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; }
+    .badge-ssh  { background: #1f6feb33; color: #58a6ff; border: 1px solid #1f6feb; }
+    .badge-http { background: #3fb95033; color: #3fb950; border: 1px solid #3fb950; }
+    .badge-ftp  { background: #d2992133; color: #d29922; border: 1px solid #d29922; }
+    .badge-rce  { background: #f8514933; color: #f85149; border: 1px solid #f85149; }
+    .pulse { animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    #map { height: 420px; border-radius: 12px; }
+    .nav-link { color: #8b949e; transition: color 0.2s; }
+    .nav-link:hover, .nav-link.active { color: #e6edf3; }
+    .stat-number { font-size: 2.2rem; font-weight: 700; line-height: 1; }
+    .toast-container { position:fixed; top:1rem; right:1rem; z-index:9999; max-width:340px; }
+    .toast { background:#161b22; border:1px solid #30363d; border-radius:8px;
+             padding:.75rem 1rem; margin-bottom:.5rem;
+             animation: slideIn .3s ease; }
+    @keyframes slideIn { from{transform:translateX(100%);opacity:0} to{transform:translateX(0);opacity:1} }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body class="min-h-screen">
+
+<nav class="border-b border-gray-800 px-6 py-3 flex items-center justify-between">
+  <div class="flex items-center gap-3">
+    <div class="w-8 h-8 rounded-lg bg-red-600 flex items-center justify-center">
+      <svg width="18" height="18" fill="none" stroke="white" stroke-width="2" viewBox="0 0 24 24">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+      </svg>
+    </div>
+    <span class="text-lg font-bold text-white">HoneyShield</span>
+    <span class="text-xs px-2 py-0.5 rounded-full bg-red-900 text-red-300 ml-1">LIVE</span>
+  </div>
+  <div class="flex items-center gap-6 text-sm">
+    <a href="{{ url_for('index') }}"   class="nav-link {% if request.endpoint=='index'   %}active font-medium text-white{% endif %}">Dashboard</a>
+    <a href="{{ url_for('attacks_page') }}" class="nav-link {% if request.endpoint=='attacks_page' %}active font-medium text-white{% endif %}">Attack Log</a>
+    <a href="{{ url_for('intelligence_page') }}" class="nav-link {% if request.endpoint=='intelligence_page' %}active font-medium text-white{% endif %}">
+      <span class="text-purple-400 font-semibold">Intelligence</span>
+    </a>
+    <a href="{{ url_for('logout') }}"  class="nav-link text-gray-500 hover:text-red-400">Logout</a>
+  </div>
+</nav>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<main class="p-6 max-w-screen-2xl mx-auto">
+  {% block content %}{% endblock %}
+</main>
+
+<script>
+  lucide.createIcons();
+
+  function esc(s) {
+    if (s == null) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  const socket = io();
+  socket.on("new_attack", (data) => {
+    showToast(data);
+    if (typeof onNewAttack === "function") onNewAttack(data);
+  });
+
+  function showToast(attack) {
+    const badges = { ssh:"badge-ssh", http:"badge-http", ftp:"badge-ftp" };
+    const badgeClass = badges[attack.service] || "badge-ssh";
+    const toast = document.createElement("div");
+    toast.className = "toast";
+    toast.innerHTML = `
+      <div class="flex items-center gap-2 mb-1">
+        <span class="text-xs px-2 py-0.5 rounded-full font-mono ${badgeClass}">${esc(attack.service?.toUpperCase())}</span>
+        <span class="text-red-400 font-mono text-sm font-bold">${esc(attack.src_ip) || "?"}</span>
+        <span class="text-gray-500 text-xs ml-auto">${esc(attack.country)}</span>
+      </div>
+      <div class="text-xs text-gray-400 font-mono truncate">${attack.username ? `user=${esc(attack.username)} pass=${esc(attack.password)}` : esc(attack.path || "")}</div>
+    `;
+    document.getElementById("toastContainer").prepend(toast);
+    setTimeout(() => toast.remove(), 6000);
+  }
+</script>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>
