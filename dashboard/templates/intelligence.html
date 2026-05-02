@@ -18,7 +18,7 @@
 
 <div class="flex items-center justify-between mb-6">
   <div>
-    <h1 class="text-xl font-bold text-white">⚡ Threat Intelligence</h1>
+    <h1 class="text-xl font-bold text-white">Threat Intelligence</h1>
     <p class="text-sm text-gray-500 mt-0.5">MITRE ATT&CK mapping · IP reputation scoring · Campaign detection · ML anomalies</p>
   </div>
   <button onclick="loadAll()" class="text-xs px-3 py-1.5 rounded-lg bg-purple-900 text-purple-300 hover:bg-purple-800 transition">↺ Refresh</button>
@@ -228,7 +228,7 @@ function renderCampaigns(campaigns) {
   el.innerHTML = campaigns.map(c => `
     <div class="card p-3 severity-high">
       <div class="flex items-center justify-between mb-1">
-        <span class="text-xs font-semibold text-yellow-400">${c.type === "credential_sharing" ? "🔑 Credential Sharing" : "🤖 Tool Sharing"}</span>
+        <span class="text-xs font-semibold text-yellow-400">${c.type === "credential_sharing" ? "Credential Sharing" : "Tool Sharing"}</span>
         <span class="text-xs text-gray-500">${c.ip_count} IPs · ${c.total_hits} hits</span>
       </div>
       <p class="text-gray-300 font-mono truncate">${esc(c.indicator)}</p>

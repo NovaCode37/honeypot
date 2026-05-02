@@ -29,13 +29,14 @@ HoneyShield is an open-source network security research platform that deploys de
 
 ## Screenshots
 
-| Main Dashboard | Attack Log |
-|:---:|:---:|
-| ![dashboard](docs/assets/screenshot_map.png) | ![attacks](docs/assets/screenshot_stats.png) |
+### Main Dashboard
+![Dashboard](docs/assets/dashboard.png)
 
-| Threat Intelligence | MITRE ATT&CK Heatmap |
-|:---:|:---:|
-| ![intel](docs/assets/screenshot_intel.png) | ![mitre](docs/assets/screenshot_mitre.png) |
+### Attack Log
+![Attack Log](docs/assets/attacks.png)
+
+### Threat Intelligence
+![Threat Intelligence](docs/assets/intelligence.png)
 
 ---
 
